@@ -27,9 +27,15 @@ FetchContent_MakeAvailable(rerun_sdk)
 
 FetchContent_MakeAvailable(raylib)
 
+find_package(Curses REQUIRED)
+
+find_package(PkgConfig REQUIRED)
+pkg_search_module(GLFW REQUIRED glfw3)
+
 add_executable(MCL src/main.cpp)
 
-target_link_libraries(MCL PUBLIC raylib rerun_sdk Eigen3::Eigen)
+target_include_directories(MCL PRIVATE include ${GLFW_INCLUDE_DIRS} ${CURSES_INCLUDE_DIR})
+target_link_libraries(MCL PUBLIC raylib rerun_sdk Eigen3::Eigen ${GLFW_LIBRARIES} ${CURSES_LIBRARIES})
 
 FetchContent_Declare(
         googletest

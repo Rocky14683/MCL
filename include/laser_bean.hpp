@@ -17,6 +17,7 @@ public:
 
     void update(const Pose2d &robot_pose) {
         this->transform(robot_pose);
+        this->update_sensor_value_raw();
     }
 
 
@@ -25,14 +26,82 @@ public:
         auto offset_transformed = transform * offset;
         this->global_pose.x() = offset_transformed.x();
         this->global_pose.y() = offset_transformed.y();
-        this->global_pose.z() = robot_pose.z() + offset.z();
-        this->global_pose.z() = norm(this->global_pose.z());
+        this->global_pose.z() = norm(robot_pose.z() + offset.z());
     }
 
 
     double get_sensor_value() const {
         return this->sensor_value;
     }
+
+    void draw_bean() {
+        static constexpr double sensor_size = 2;
+        static constexpr double sensor_half_size = sensor_size / 2;
+        std::vector<rr::Position2D> cornors = {
+                rr::Position2D(sensor_half_size, sensor_half_size),
+                rr::Position2D(sensor_half_size, -sensor_half_size),
+                rr::Position2D(-sensor_half_size, sensor_half_size),
+                rr::Position2D(-sensor_half_size, -sensor_half_size),
+        };
+
+
+        if (DRAW) {
+            std::string log_path = std::format("laser_bean_{}", this->id);
+
+            auto sensor_out = this->get_sensor_value();
+
+            std::vector<std::vector<rr::Position2D>> laser_line = {
+                    {rr::Position2D(static_cast<float>(this->global_pose.x()),
+                                    static_cast<float>(this->global_pose.y())),
+                     rr::Position2D(static_cast<float>((global_pose.x() + cos(global_pose.z()) * sensor_out)),
+                                    static_cast<float>((global_pose.y() + sin(global_pose.z()) * sensor_out)))}
+            };
+
+            rec.log(log_path + "/laser", rr::LineStrips2D(laser_line)
+                    .with_colors({0xFF0000FF}));
+
+
+            rr::Position2D center = {static_cast<float>(this->global_pose.x()),
+                                     static_cast<float>(this->global_pose.y())};
+            Transform2d transform(this->global_pose);
+            for (auto &cord: cornors) {
+                cord = transform * cord;
+            }
+
+            std::vector<std::vector<rr::Position2D>> sensor_bbox = {
+                    {cornors[0], cornors[1]},
+                    {cornors[1], cornors[3]},
+                    {cornors[3], cornors[2]},
+                    {cornors[2], cornors[0]},
+            };
+
+
+            rec.log(log_path + "/sensor",
+                    rr::LineStrips2D(sensor_bbox)
+                            .with_radii(0.05)
+                            .with_colors({0xFAFAFAFF})
+                            .with_labels(
+                                    {std::format("[{:.2f}, {:.2f}]", this->global_pose.x(), this->global_pose.y())}));
+
+        }
+    }
+
+    inline double gen_gauss_random(double mean, double variance) {
+        std::normal_distribution<double> gauss_dist(mean, variance);
+        return gauss_dist(gen);
+    }
+
+private:
+    // laser position relative to the world
+    Pose2d global_pose;
+    // laser pose relative to the robot
+    Pose2d offset;
+    double noise;
+    double sensor_value;
+    std::random_device rd;
+    std::mt19937 gen{rd()};
+    size_t id = 0;
+    static size_t id_counter;
 
     double get_sensor_out_t() const {
         double heading = global_pose.z();
@@ -79,89 +148,18 @@ public:
             }
         }
 
-        if (t_min == std::numeric_limits<double>::infinity()) {
-            std::cerr << "[LaserModel] Warning: No valid wall hit detected.\n";
-        }
+//        if (t_min == std::numeric_limits<double>::infinity()) {
+//            std::cerr << "[LaserModel] Warning: No valid wall hit detected.\n";
+//        }
 
         return t_min;
     }
 
-    void draw_bean() {
-        static constexpr double sensor_size = 2;
-        static constexpr double sensor_half_size = sensor_size / 2;
-        std::vector<rr::Position2D> cornors = {
-                rr::Position2D(sensor_half_size, sensor_half_size),
-                rr::Position2D(sensor_half_size, -sensor_half_size),
-                rr::Position2D(-sensor_half_size, sensor_half_size),
-                rr::Position2D(-sensor_half_size, -sensor_half_size),
-        };
-
-
-        if (DRAW) {
-            std::string log_path = std::format("laser_bean_{}", this->id);
-
-            auto sensor_out = this->update_sensor_value();
-
-            std::vector<std::vector<rr::Position2D>> laser_line = {
-                    {rr::Position2D(static_cast<float>(this->global_pose.x()),
-                                    static_cast<float>(this->global_pose.y())),
-                     rr::Position2D(static_cast<float>((global_pose.x() + cos(global_pose.z()) * sensor_out)),
-                                    static_cast<float>((global_pose.y() + sin(global_pose.z()) * sensor_out)))}
-            };
-
-            rec.log(log_path + "/laser", rr::LineStrips2D(laser_line)
-                    .with_colors({0xFF0000FF}));
-
-
-            rr::Position2D center = {static_cast<float>(this->global_pose.x()),
-                                     static_cast<float>(this->global_pose.y())};
-            Transform2d transform(this->global_pose);
-            for (auto &cord: cornors) {
-                cord = transform * cord;
-            }
-
-            std::vector<std::vector<rr::Position2D>> sensor_bbox = {
-                    {cornors[0], cornors[1]},
-                    {cornors[1], cornors[3]},
-                    {cornors[3], cornors[2]},
-                    {cornors[2], cornors[0]},
-            };
-
-
-            rec.log(log_path + "/sensor",
-                    rr::LineStrips2D(sensor_bbox)
-                            .with_radii(0.05)
-                            .with_colors({0xFAFAFAFF})
-                            .with_labels(
-                                    {std::format("[{:.2f}, {:.2f}]", this->global_pose.x(), this->global_pose.y())}));
-
-        }
-    }
-
-private:
-    // laser position relative to the world
-    Pose2d global_pose;
-    // laser pose relative to the robot
-    Pose2d offset;
-    double noise;
-    double sensor_value;
-    std::random_device rd;
-    std::mt19937 gen{rd()};
-    size_t id = 0;
-
-    double update_sensor_value() {
+    double update_sensor_value_raw() {
         double expected_dist = get_sensor_out_t();
         double err = this->gen_gauss_random(0.0, this->noise);
         this->sensor_value = expected_dist + err;
         return sensor_value;
-    }
-
-public:
-    static size_t id_counter;
-
-    inline double gen_gauss_random(double mean, double variance) {
-        std::normal_distribution<double> gauss_dist(mean, variance);
-        return gauss_dist(gen);
     }
 };
 

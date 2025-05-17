@@ -8,10 +8,13 @@
 #include "rlgl.h"
 #include "raymath.h"
 #include <rerun.hpp>
-
-const int screen_w = 1400;
-const int screen_h = 800;
-
+#include <unordered_set>
+#include <mutex>
+#include <fcntl.h>
+#include <termios.h>
+#include <map>
+#include <GLFW/glfw3.h>
+#include <ncurses.h>
 
 
 int main() {
@@ -21,13 +24,21 @@ int main() {
 
     LaserModel l({0, 0, 0}, {0, 0, 0});
     float i = 20;
-    Robot r({i, i, M_PI_4}, {{-10, 5, std::numbers::pi}, {10, 5, std::numbers::pi / 2.0}});
-
-    float t = M_PI_4;
+    Robot r({i, i, 0}, {{-10, 5, std::numbers::pi}, {10, 5, std::numbers::pi / 2.0}});
+    MCL<100> mcl({i, i, 0}, {{-10, 5, std::numbers::pi}, {10, 5, std::numbers::pi / 2.0}}, [&r] -> double{
+        return r.get_pose().z();
+    });
+    Robot::EncoderInput input{.left = 0.0001, .middle = 0, .right = 0.0002};
     while(true) {
-        r.update({i+= 0.0005, i, t += 0.0001});
+        auto lasers = r.get_laser_values();
+        r.update(input);
         r.draw();
 
+        mcl.predict(input);
+        mcl.update(lasers);
+        mcl.resample();
+
+        mcl.draw();
 //
 //        l.draw_bean();
     }

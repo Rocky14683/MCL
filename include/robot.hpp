@@ -9,21 +9,81 @@ constexpr double robot_size = 20;
 
 class Robot {
 public:
-    Robot(Pose2d pose, std::initializer_list<Pose2d> laser_bean_offsets) : pose(std::move(pose)) {
+    struct EncoderInput {
+        double left, middle, right;
+    };
+
+    Robot(Pose2d pose, std::initializer_list<Pose2d> laser_bean_offsets, std::pair<double, double> noises = {0.1f, 0.05f})
+            : pose(
+            std::move(pose)), noises(noises) {
         for (const Pose2d &offset: laser_bean_offsets) {
             this->laser_beans.emplace_back(std::make_shared<LaserModel>(offset, this->pose));
         }
     }
 
+    EncoderInput gen_noisy_encoder(EncoderInput input) {
+        input.left += this->gen_gauss_random(0.0, this->noises.first);
+        input.middle += this->gen_gauss_random(0.0, this->noises.second);
+        input.right += this->gen_gauss_random(0.0, this->noises.first);
 
-    void update(const Pose2d& new_pose) {
+        return input;
+    }
+
+    void update(const EncoderInput& input) {
+        static constexpr double tpi = 180;
+        static constexpr double left_right_dist = 18.0 / 2;
+        static constexpr double middle_dist = 8.0;
+
+        double delta_left, delta_right, delta_middle, delta_angle;
+
+        delta_left = input.left * tpi;
+        delta_middle = input.middle * tpi;
+        delta_right = input.right * tpi;
+        delta_angle = (delta_right - delta_left) / (2 * left_right_dist);
+
+        double local_x;
+        double local_y;
+
+        constexpr static double eps = 1e-6;
+        if (std::abs(delta_angle) > eps) {
+            double i = sin(delta_angle / 2.0) * 2.0;
+            local_x = (delta_right + delta_left) / (2 * delta_angle) * i;
+            local_y = (delta_middle / delta_angle + middle_dist) * i;
+        } else {
+            local_x = delta_right;
+            local_y = delta_middle;
+        }
+
+        double p = this->pose.z() - delta_angle / 2.0; // global angle
+
+        // convert to absolute displacement
+        this->pose.x() += cos(p) * local_x - sin(p) * local_y;
+        this->pose.y() += sin(p) * local_x + cos(p) * local_y;
+        Pose2d new_pose = {
+                this->pose.x() + cos(p) * local_x - sin(p) * local_y,
+                this->pose.y() + sin(p) * local_x + cos(p) * local_y,
+                this->pose.z() + delta_angle
+        };
+        this->update(new_pose);
+    }
+
+
+    void update(const Pose2d &new_pose) {
         this->pose = new_pose;
         for (const auto &laser: laser_beans) {
             laser->update(pose);
         }
     }
 
-    void draw() {
+    Pose2d get_pose() const {
+        return this->pose;
+    }
+
+    void set_pose(const Pose2d &new_pose) {
+        this->update(new_pose);
+    }
+
+    void draw(std::string_view log_path = "robot") {
         static float robot_half_size = robot_size / 2;
         std::vector<rr::Position2D> cornors = {
                 rr::Position2D(robot_half_size, robot_half_size),
@@ -40,7 +100,7 @@ public:
                 cord = transform * cord;
             }
 
-            rr::Position2D heading = transform * rr::Position2D(0, robot_half_size);
+            rr::Position2D heading = transform * rr::Position2D(robot_half_size, 0);
 
             std::vector<std::vector<rr::Position2D>> bbox = {
                     {cornors[0], cornors[1]},
@@ -54,20 +114,20 @@ public:
             };
 
 
-            rec.log("robot/position",
+            rec.log(std::format("{}/position", log_path),
                     rr::Points2D()
                             .with_positions({center})
                             .with_colors(rr::Color(255, 0, 0))
                             .with_radii(0.1));
 
 
-            rec.log("robot/bbox",
+            rec.log(std::format("{}/bbox", log_path),
                     rr::LineStrips2D(bbox)
                             .with_colors(rr::Color(0, 255, 0))
                             .with_radii(0.05)
                             .with_labels({std::format("[{:.2f}, {:.2f}]", this->pose.x(), this->pose.y())}));
 
-            rec.log("robot/heading",
+            rec.log(std::format("{}/heading", log_path),
                     rr::LineStrips2D(heading_line)
                             .with_colors(rr::YELLOW)
                             .with_radii(0.2));
@@ -80,7 +140,29 @@ public:
         }
     }
 
+
+    std::vector<double> get_laser_values() {
+        std::vector<double> values;
+        for (const auto &laser: laser_beans) {
+            values.push_back(laser->get_sensor_value());
+        }
+        return values;
+    }
+
+
+    std::vector<std::shared_ptr<LaserModel>> get_lasers() {
+        return this->laser_beans;
+    }
+
 private:
     Pose2d pose;
+    std::pair<double, double> noises;
     std::vector<std::shared_ptr<LaserModel>> laser_beans{};
+    std::random_device rd;
+    std::mt19937 gen{rd()};
+
+    inline double gen_gauss_random(double mean, double variance) {
+        std::normal_distribution<double> gauss_dist(mean, variance);
+        return gauss_dist(gen);
+    }
 };
