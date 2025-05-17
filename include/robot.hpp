@@ -5,7 +5,9 @@
 #include "transform2d.hpp"
 
 
+constexpr double tpi = 180;
 constexpr double robot_size = 20;
+constexpr double robot_half_size = robot_size / 2;
 
 class Robot {
 public:
@@ -13,13 +15,14 @@ public:
         double left, middle, right;
     };
 
-    Robot(Pose2d pose, std::initializer_list<Pose2d> laser_bean_offsets, std::pair<double, double> noises = {0.1f, 0.05f})
+    Robot(Pose2d pose, std::vector<Pose2d> laser_bean_offsets, std::pair<double, double> noises = {3.f, 3.f})
             : pose(
             std::move(pose)), noises(noises) {
         for (const Pose2d &offset: laser_bean_offsets) {
             this->laser_beans.emplace_back(std::make_shared<LaserModel>(offset, this->pose));
         }
     }
+
 
     EncoderInput gen_noisy_encoder(EncoderInput input) {
         input.left += this->gen_gauss_random(0.0, this->noises.first);
@@ -29,16 +32,16 @@ public:
         return input;
     }
 
-    void update(const EncoderInput& input) {
-        static constexpr double tpi = 180;
+    Pose2d get_translation_and_update(const EncoderInput& input, bool update = true) {
+
         static constexpr double left_right_dist = 18.0 / 2;
         static constexpr double middle_dist = 8.0;
 
         double delta_left, delta_right, delta_middle, delta_angle;
 
-        delta_left = input.left * tpi;
-        delta_middle = input.middle * tpi;
-        delta_right = input.right * tpi;
+        delta_left = input.left / tpi;
+        delta_middle = input.middle / tpi;
+        delta_right = input.right / tpi;
         delta_angle = (delta_right - delta_left) / (2 * left_right_dist);
 
         double local_x;
@@ -56,15 +59,22 @@ public:
 
         double p = this->pose.z() - delta_angle / 2.0; // global angle
 
-        // convert to absolute displacement
-        this->pose.x() += cos(p) * local_x - sin(p) * local_y;
-        this->pose.y() += sin(p) * local_x + cos(p) * local_y;
+        double dx = cos(p) * local_x - sin(p) * local_y;
+        double dy = sin(p) * local_x + cos(p) * local_y;
+
+
+
         Pose2d new_pose = {
                 this->pose.x() + cos(p) * local_x - sin(p) * local_y,
                 this->pose.y() + sin(p) * local_x + cos(p) * local_y,
                 this->pose.z() + delta_angle
         };
-        this->update(new_pose);
+
+        if(update) {
+            this->update(new_pose);
+        }
+
+        return {dx, dy, delta_angle};
     }
 
 
@@ -84,7 +94,6 @@ public:
     }
 
     void draw(std::string_view log_path = "robot") {
-        static float robot_half_size = robot_size / 2;
         std::vector<rr::Position2D> cornors = {
                 rr::Position2D(robot_half_size, robot_half_size),
                 rr::Position2D(robot_half_size, -robot_half_size),
@@ -141,10 +150,18 @@ public:
     }
 
 
-    std::vector<double> get_laser_values() {
+    std::vector<double> get_laser_values_clean() {
         std::vector<double> values;
         for (const auto &laser: laser_beans) {
-            values.push_back(laser->get_sensor_value());
+            values.push_back(laser->get_sensor_out_clean());
+        }
+        return values;
+    }
+
+    std::vector<double> get_laser_values_dirty() {
+        std::vector<double> values;
+        for (const auto &laser: laser_beans) {
+            values.push_back(laser->get_sensor_value_dirty());
         }
         return values;
     }

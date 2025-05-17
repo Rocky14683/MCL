@@ -8,7 +8,7 @@
 
 class LaserModel {
 public:
-    LaserModel(const Pose2d &offset, const Pose2d &robot_pose, double noise = 0.1) : offset(offset),
+    LaserModel(const Pose2d &offset, const Pose2d &robot_pose, double noise = 0.01) : offset(offset),
                                                                                      noise(noise) {
         this->transform(robot_pose);
         this->id = id_counter++;
@@ -17,7 +17,6 @@ public:
 
     void update(const Pose2d &robot_pose) {
         this->transform(robot_pose);
-        this->update_sensor_value_raw();
     }
 
 
@@ -30,9 +29,11 @@ public:
     }
 
 
-    double get_sensor_value() const {
-        return this->sensor_value;
-    }
+//    double get_sensor_value() const {
+//        std::cout << "Laser at (" << global_pose.x() << ", " << global_pose.y()
+//                  << ") heading: " << global_pose.z() << " rad. dist: " << this->sensor_value << "\n";
+//        return this->sensor_value;
+//    }
 
     void draw_bean() {
         static constexpr double sensor_size = 2;
@@ -45,10 +46,10 @@ public:
         };
 
 
-        if (DRAW) {
+        if (false) {
             std::string log_path = std::format("laser_bean_{}", this->id);
 
-            auto sensor_out = this->get_sensor_value();
+            auto sensor_out = this->get_sensor_out_clean();
 
             std::vector<std::vector<rr::Position2D>> laser_line = {
                     {rr::Position2D(static_cast<float>(this->global_pose.x()),
@@ -91,24 +92,10 @@ public:
         return gauss_dist(gen);
     }
 
-private:
-    // laser position relative to the world
-    Pose2d global_pose;
-    // laser pose relative to the robot
-    Pose2d offset;
-    double noise;
-    double sensor_value;
-    std::random_device rd;
-    std::mt19937 gen{rd()};
-    size_t id = 0;
-    static size_t id_counter;
-
-    double get_sensor_out_t() const {
+    double get_sensor_out_clean() const {
         double heading = global_pose.z();
         double dx = std::cos(norm(heading));
         double dy = std::sin(norm(heading));
-        std::cout << "Laser at (" << global_pose.x() << ", " << global_pose.y()
-                  << ") heading: " << heading << " rad\n";
 
         double t_min = std::numeric_limits<double>::infinity();
 
@@ -155,12 +142,26 @@ private:
         return t_min;
     }
 
-    double update_sensor_value_raw() {
-        double expected_dist = get_sensor_out_t();
+    double get_sensor_value_dirty() {
+        double expected_dist = get_sensor_out_clean();
         double err = this->gen_gauss_random(0.0, this->noise);
-        this->sensor_value = expected_dist + err;
-        return sensor_value;
+        return expected_dist + err;
     }
+
+private:
+    // laser position relative to the world
+    Pose2d global_pose;
+    // laser pose relative to the robot
+    Pose2d offset;
+    double noise;
+    std::random_device rd;
+    std::mt19937 gen{rd()};
+    size_t id = 0;
+    static size_t id_counter;
+
+
+
+
 };
 
 size_t LaserModel::id_counter = 0;
